@@ -1,0 +1,25 @@
+FROM python:3.11.11-slim
+
+RUN useradd -m -u 1001 appuser
+
+WORKDIR /app
+
+COPY requirements.txt .
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libpq-dev \
+        gcc \
+        git \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Make /app group-writable for arbitrary UID (OpenShift)
+RUN mkdir -p /app/vector_db && \
+    chgrp -R 0 /app && \
+    chmod -R g+rwX /app
+
+CMD ["streamlit", "run", "app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]

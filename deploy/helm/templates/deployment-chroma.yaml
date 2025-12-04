@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.chroma.name }}
+  labels:
+    app: {{ .Values.chroma.name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.chroma.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.chroma.name }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: chroma
+          image: "{{ .Values.chroma.image }}:{{ .Values.chroma.tag }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PERSIST_DIRECTORY
+              value: /data
+          command:
+            - uvicorn
+          args:
+            - chromadb.app:app
+            - --workers
+            - "1"
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --proxy-headers
+            - --timeout-keep-alive
+            - "30"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.chroma.claimName }}

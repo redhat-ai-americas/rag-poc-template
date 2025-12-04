@@ -1,0 +1,14 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ .Values.streamlit.name }}
+  labels:
+    app: {{ .Values.streamlit.name }}
+spec:
+  to:
+    kind: Service
+    name: {{ .Values.streamlit.name }}
+  port:
+    targetPort: http
+  tls:
+    termination: edge

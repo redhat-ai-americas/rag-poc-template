@@ -1,0 +1,6 @@
+# Use a Chroma 0.4.x image compatible with python chromadb <0.5
+FROM ghcr.io/chroma-core/chroma:0.4.24
+
+RUN apt-get update --allow-releaseinfo-change && \
+    apt-get install -y curl && \
+    rm -rf /var/lib/apt/lists/*

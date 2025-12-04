@@ -1,0 +1,14 @@
+apiVersion: v2
+name: rag-poc
+description: RAG (Retrieval Augmented Generation) POC Helm chart for OpenShift
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - rag
+  - streamlit
+  - chroma
+  - llm
+  - openshift
+maintainers:
+  - name: pdavis

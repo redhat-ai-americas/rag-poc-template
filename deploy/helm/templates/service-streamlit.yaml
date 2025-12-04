@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.streamlit.name }}
+  labels:
+    app: {{ .Values.streamlit.name }}
+spec:
+  selector:
+    app: {{ .Values.streamlit.name }}
+  ports:
+    - name: http
+      port: 8501
+      targetPort: 8501

@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: model-registry
+  namespace: openshift-gitops
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/pdavis327/create-model-registry.git
+    targetRevision: main
+    path: charts/create-model-registry
+    helm:
+      releaseName: model-registry
+      values: |
+        mysql:
+          user: "registry"
+          password: "CHANGE_ME"
+          database: "registrydb"
+          root_password: "CHANGE_ME"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rag-poc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true

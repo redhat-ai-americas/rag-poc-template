@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.streamlit.name }}
+  labels:
+    app: {{ .Values.streamlit.name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.streamlit.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.streamlit.name }}
+    spec:
+      containers:
+        - name: app
+          image: "{{ .Values.streamlit.image }}:{{ .Values.streamlit.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8501
+          env:
+            - name: CHROMA_HTTP_URL
+              value: http://{{ .Values.chroma.name }}:8000
+            - name: HF_HOME
+              value: /tmp/hf
+            - name: TRANSFORMERS_CACHE
+              value: /tmp/hf
+            - name: XDG_CACHE_HOME
+              value: /tmp
+          envFrom:
+            - secretRef:
+                name: {{ .Values.streamlit.secretRef }}

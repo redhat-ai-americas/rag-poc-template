@@ -1,0 +1,5 @@
+RAG POC deployed!
+
+Streamlit: oc get route {{ .Values.streamlit.name }} -o jsonpath='{.spec.host}'
+Chroma DB: {{ .Values.chroma.name }}:8000
+InferenceService: {{ .Values.inferenceService.name }}

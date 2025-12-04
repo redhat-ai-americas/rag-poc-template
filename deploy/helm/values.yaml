@@ -1,0 +1,19 @@
+# RAG POC Helm Chart Values
+
+chroma:
+  name: chroma-db
+  image: quay.io/CHANGE_ME/chroma-db
+  tag: "latest"
+  claimName: chroma-data
+
+streamlit:
+  name: streamlit-app
+  image: quay.io/CHANGE_ME/streamlit-app
+  tag: "latest"
+  secretRef: app-env
+
+inferenceService:
+  name: llm-model
+  runtime: llm-model
+  storageKey: model-storage
+  storagePath: model
