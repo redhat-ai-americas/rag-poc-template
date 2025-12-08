@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
-from typing import List
+from typing import List, Optional
+import yaml
 import markdown
 from bs4 import BeautifulSoup
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -14,6 +15,7 @@ from config import (
     CHUNK_SIZE,
     CHUNK_OVERLAP,
     CHROMA_HTTP_URL,
+    ENABLE_CHUNKING,
 )
 from .embedding_client import create_embedding_client
 
@@ -21,17 +23,60 @@ from .embedding_client import create_embedding_client
 class WikiProcessor:
     def __init__(self):
         self.embeddings = create_embedding_client()
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=CHUNK_SIZE,
-            chunk_overlap=CHUNK_OVERLAP,
-            length_function=len,
-        )
+        # Only create text splitter if chunking is enabled
+        if ENABLE_CHUNKING:
+            self.text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP,
+                length_function=len,
+            )
+        else:
+            self.text_splitter = None
+
+    def _extract_yaml_frontmatter(self, content: str) -> tuple[dict, str]:
+        """
+        Extract YAML frontmatter from markdown content if present.
+        
+        Returns:
+            Tuple of (metadata_dict, remaining_content)
+        """
+        metadata = {}
+        remaining_content = content
+        
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                try:
+                    fm = yaml.safe_load(parts[1])
+                    if fm and isinstance(fm, dict):
+                        # Convert all values to strings for ChromaDB compatibility
+                        for key, value in fm.items():
+                            if isinstance(value, list):
+                                metadata[key] = ",".join(str(v) for v in value)
+                            elif value is not None:
+                                metadata[key] = str(value)
+                        remaining_content = parts[2]
+                except yaml.YAMLError:
+                    pass
+        
+        return metadata, remaining_content
 
     def process_markdown_file(self, file_path: Path) -> List[Document]:
-        """Process a single markdown file and return chunks."""
+        """Process a single markdown file and return document(s)."""
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
+
+            # Initialize base metadata
+            metadata = {
+                "source": str(file_path),
+                "type": "wiki",
+                "filename": file_path.name,
+            }
+
+            # Extract YAML frontmatter if present
+            yaml_metadata, content_body = self._extract_yaml_frontmatter(content)
+            metadata.update(yaml_metadata)
 
             # Convert markdown to plain text
             html = markdown.markdown(content)
@@ -41,21 +86,17 @@ class WikiProcessor:
             # Clean up text
             text = re.sub(r"\n+", "\n", text)
             text = re.sub(r" +", " ", text)
+            text = text.strip()
 
             # Create document
-            doc = Document(
-                page_content=text,
-                metadata={
-                    "source": str(file_path),
-                    "type": "wiki",
-                    "filename": file_path.name,
-                    "path": str(file_path.relative_to(WIKI_MD_DIR)),
-                },
-            )
+            doc = Document(page_content=text, metadata=metadata)
 
-            # Split into chunks
-            chunks = self.text_splitter.split_documents([doc])
-            return chunks
+            # Split into chunks if enabled, otherwise return single document
+            if self.text_splitter and ENABLE_CHUNKING:
+                chunks = self.text_splitter.split_documents([doc])
+                return chunks
+            else:
+                return [doc]
 
         except Exception as e:
             print(f"Error processing {file_path}: {e}")
@@ -63,27 +104,26 @@ class WikiProcessor:
 
     def process_wiki_directory(self) -> List[Document]:
         """Process all markdown files in the wiki directory."""
-        all_chunks = []
+        all_docs = []
 
         file_iter = WIKI_MD_DIR.rglob("*.md")
         processed_files = 0
         for file_path in file_iter:
             if file_path.is_file():
-                chunks = self.process_markdown_file(file_path)
-                all_chunks.extend(chunks)
+                docs = self.process_markdown_file(file_path)
+                all_docs.extend(docs)
                 processed_files += 1
 
+        chunk_status = "with chunking" if ENABLE_CHUNKING else "without chunking"
         print(
-            f"Processed {len(all_chunks)} chunks from wiki files (files processed: {processed_files})"
+            f"Processed {len(all_docs)} documents from {processed_files} files ({chunk_status})"
         )
-        return all_chunks
+        return all_docs
 
     def create_vector_store(
         self, documents: List[Document], collection_name: str = "wiki"
     ) -> Chroma:
         """Create and return a Chroma vector store."""
-        # VECTOR_DB_DIR is now handled in config.py with proper fallbacks
-
         # Prepare payloads
         texts = [doc.page_content for doc in documents]
         metadatas = [doc.metadata for doc in documents]
@@ -104,6 +144,7 @@ class WikiProcessor:
                 collection_name=collection_name,
                 collection_metadata={"hnsw:space": "cosine"},
             )
+        
         # Embed and add in batches to handle large corpora and partial failures
         batch_size = 64
         total_added = 0
@@ -139,7 +180,6 @@ class WikiProcessor:
             total_added += usable
 
         print(f"Added {total_added} documents to collection '{collection_name}'")
-        # Persistence is automatic with langchain-chroma/Chroma 0.4.x+
         print(f"Created vector store with {total_added} documents")
 
         return vector_store

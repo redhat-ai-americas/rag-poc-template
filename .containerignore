@@ -1,0 +1,57 @@
+# Exclude large data files
+assets/raw/
+data/
+
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local development
+.env
+*.log
+vector_db/
+
+# Deployment configs (not needed in container)
+deploy/
+ops/
+argocd/
+
+# Build artifacts
+*.tar
+*.tar.gz
+dist/
+build/
+
+# Documentation
+README.md
+LICENSE
+
+# Containers folder (Containerfiles themselves)
+containers/
+
+# Models and taxonomy (if large)
+models/
+taxonomy/
+
+# Infrastructure
+infrastructure/
+
+# Unit tests
+tests/
+

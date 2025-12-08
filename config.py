@@ -40,8 +40,12 @@ VECTOR_DB_DIR = get_vector_db_dir()
 CHROMA_HTTP_URL = os.getenv("CHROMA_HTTP_URL")
 
 # Vector database settings (tuned for embedding model max context)
-CHUNK_SIZE = int(os.getenv("CHUNK_SIZE"))
-CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP"))
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "2000"))
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
+ENABLE_CHUNKING = os.getenv("ENABLE_CHUNKING", "true").lower() in ("true", "1", "yes")
+
+# Context cap for LLM (adjust based on model context window)
+CONTEXT_MAX_CHARS = int(os.getenv("CONTEXT_MAX_CHARS", "30000"))
 
 # Embedding model configuration - Set these in .env file
 EMBEDDING_ENDPOINT = os.getenv("EMBEDDING_MODEL_ENDPOINT")

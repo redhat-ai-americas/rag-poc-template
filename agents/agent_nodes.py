@@ -1,20 +1,36 @@
-from typing import Dict, Any
+from typing import Dict, Any, List
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
+from langchain_community.retrievers import BM25Retriever
+from langchain.retrievers.ensemble import EnsembleRetriever
 from config import (
     AGENT_CONFIGS,
     TEMP,
     RETRIEVAL_K,
     WIKI_RETRIEVAL_SIMILARITY_THRESHOLD,
     QUERY_REWRITER_TURNS,
+    CONTEXT_MAX_CHARS,
 )
 
 
 class AgentNodes:
-    def __init__(self, vector_stores: Dict[str, Chroma]):
+    def __init__(self, vector_stores: Dict[str, Chroma], corpus_docs: List[Document] = None):
         self.vector_stores = vector_stores
+        self.corpus_docs = corpus_docs or []
         self.agents: Dict[str, ChatOpenAI] = {}
+        self.bm25_retriever = None
+
+        # Initialize BM25 retriever if corpus docs provided (for hybrid search)
+        if self.corpus_docs:
+            try:
+                self.bm25_retriever = BM25Retriever.from_documents(
+                    self.corpus_docs, k=RETRIEVAL_K
+                )
+                print(f"Initialized BM25 retriever with {len(self.corpus_docs)} documents")
+            except Exception as e:
+                print(f"Failed to initialize BM25 retriever: {e}")
 
         # Initialize wiki agent only (wiki-only RAG)
         wiki_cfg = AGENT_CONFIGS.get("wiki", {})
@@ -34,7 +50,7 @@ class AgentNodes:
             print("Skipping wiki agent - missing endpoint or model configuration")
 
     def wiki_agent(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Agent for handling wiki documentation queries using the aligned model."""
+        """Agent for handling documentation queries using the aligned model."""
         query = state["query"]
         chat_history = state.get("chat_history", "")
 
@@ -49,7 +65,7 @@ class AgentNodes:
         wiki_store = self.vector_stores.get("wiki")
         if not wiki_store:
             return {
-                "wiki_answer": "Wiki documentation not available.",
+                "wiki_answer": "Documentation not available.",
                 "model": AGENT_CONFIGS["wiki"]["model"],
             }
 
@@ -85,50 +101,79 @@ class AgentNodes:
             except Exception:
                 rewritten = None
 
-        retriever = wiki_store.as_retriever(
+        effective_query = rewritten or query
+        
+        # Build hybrid retriever: vector + BM25 for better keyword matching
+        vector_retriever = wiki_store.as_retriever(
             search_type="similarity_score_threshold",
             search_kwargs={
                 "k": RETRIEVAL_K,
                 "score_threshold": float(WIKI_RETRIEVAL_SIMILARITY_THRESHOLD),
             },
         )
-        docs = retriever.invoke(rewritten or query)[:RETRIEVAL_K]
+
+        # Use ensemble retrieval if BM25 is available (60% vector, 40% BM25)
+        if self.bm25_retriever:
+            try:
+                ensemble = EnsembleRetriever(
+                    retrievers=[vector_retriever, self.bm25_retriever],
+                    weights=[0.6, 0.4]
+                )
+                docs = ensemble.invoke(effective_query)[:RETRIEVAL_K]
+            except Exception as e:
+                print(f"Ensemble retrieval failed, falling back to vector only: {e}")
+                docs = vector_retriever.invoke(effective_query)[:RETRIEVAL_K]
+        else:
+            docs = vector_retriever.invoke(effective_query)[:RETRIEVAL_K]
+
+        # Fallback to original query if rewrite was too narrow
         if not docs and rewritten:
-            # Fallback to original query if rewrite was too narrow
-            docs = retriever.invoke(query)[:RETRIEVAL_K]
+            if self.bm25_retriever:
+                try:
+                    ensemble = EnsembleRetriever(
+                        retrievers=[vector_retriever, self.bm25_retriever],
+                        weights=[0.6, 0.4]
+                    )
+                    docs = ensemble.invoke(query)[:RETRIEVAL_K]
+                except Exception:
+                    docs = vector_retriever.invoke(query)[:RETRIEVAL_K]
+            else:
+                docs = vector_retriever.invoke(query)[:RETRIEVAL_K]
+
         if not docs:
             return {
-                "wiki_answer": "I'm sorry, I couldn't find an answer to your question in the available documentation.",
-                "query": (rewritten or query),
-                "used_query": (rewritten or query),
+                "wiki_answer": "I couldn't find any matching documents for your query.",
+                "query": effective_query,
+                "used_query": effective_query,
                 "rewritten_query": rewritten,
             }
-        context = "\n\n".join([doc.page_content for doc in docs])
-        # Soft cap context size to mitigate upstream timeouts
-        context = context[:8000]
 
-        # Wiki agent system prompt
+        context = "\n\n---\n\n".join([doc.page_content for doc in docs])
+        # Soft cap context size based on LLM context window
+        context = context[:CONTEXT_MAX_CHARS]
+
+        # System prompt for RAG
         system_prompt = f"""### ROLE AND GOAL ###
-            You are an AI assistant for technical support. Your purpose is to provide clear and accurate answers to technical questions.
+You are an AI assistant. Your purpose is to provide clear and accurate answers based on the provided context.
 
-            ### INSTRUCTIONS ###
-            1. Synthesize Your Answer: Combine the provided context with your internal knowledge to form your answer. If the context and your internal memory conflict, you must treat the provided context as the more current source of truth.
-            2. Address the Question: Directly answer the user's question.
-            3. Format for Readability: Use bullet points, numbered lists, and **bold text** to make key information easy to follow.
-            4. Admit When You Don't Know: If the answer cannot be found in the provided context or your internal memory, respond with: "I'm sorry, I couldn't find an answer to your question in the available documentation. Feel free to ask me something else, or you can try rephrasing your last question." NEVER invent an answer.
+### INSTRUCTIONS ###
+1. Synthesize Your Answer: Combine the provided context with your internal knowledge to form your answer. If the context and your internal memory conflict, treat the provided context as the more current source of truth.
+2. Address the Question: Directly answer the user's question.
+3. Format for Readability: Use bullet points, numbered lists, and **bold text** to make key information easy to follow.
+4. Admit When You Don't Know: If the answer cannot be found in the provided context or your internal memory, respond with: "I'm sorry, I couldn't find an answer to your question in the available documentation." NEVER invent an answer.
 
-            ### CONVERSATION SO FAR ###
-            {chat_history}
+### CONVERSATION SO FAR ###
+{chat_history}
 
-            ### CONTEXT ###
-            {context}
-            """
+### CONTEXT ###
+{context}
+"""
 
         # Generate response using wiki-specific model
-        effective_query = rewritten or query
+        final_query = rewritten or query
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=effective_query),
+            HumanMessage(content=final_query),
         ]
         final_answer = self.agents["wiki"].invoke(messages).content
 
@@ -136,8 +181,8 @@ class AgentNodes:
             "wiki_answer": final_answer,
             "wiki_context_docs": [doc.metadata for doc in docs],
             "wiki_context_text": context,
-            "query": effective_query,
-            "used_query": effective_query,
+            "query": final_query,
+            "used_query": final_query,
             "rewritten_query": rewritten,
             "endpoint": AGENT_CONFIGS["wiki"]["endpoint"],
         }

@@ -21,7 +21,9 @@ class AgenticWorkflow:
     def __init__(self, vector_stores: Dict[str, Any], corpora: Dict[str, Any] = None):
         self.vector_stores = vector_stores
         self.corpora = corpora or {}
-        self.agent_nodes = AgentNodes(vector_stores)
+        # Pass corpus docs to AgentNodes for BM25 hybrid retrieval
+        corpus_docs = self.corpora.get("wiki", [])
+        self.agent_nodes = AgentNodes(vector_stores, corpus_docs=corpus_docs)
         self.workflow = self._build_workflow()
         self._thread_id = str(uuid.uuid4())
 
