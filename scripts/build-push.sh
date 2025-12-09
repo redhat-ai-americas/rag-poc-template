@@ -101,10 +101,20 @@ if [[ "$BUILD_APP" == "true" ]]; then
   podman push $REGISTRY/$STREAMLIT_IMAGE:$SHA
 fi
 
-# Update Helm values with new image tags
+# Update Helm values with new image tags (only for images that were built)
 echo ""
-echo "Updating Helm values.yaml with tag: $SHA"
-sed -i "s|^\(\s*tag:\s*\).*|\\1\"$SHA\"|" deploy/helm/values.yaml
+if [[ "$BUILD_CHROMA" == "true" && "$BUILD_APP" == "true" ]]; then
+  echo "Updating Helm values.yaml - both images to tag: $SHA"
+  sed -i "s|^\(\s*tag:\s*\).*|\\1\"$SHA\"|" deploy/helm/values.yaml
+elif [[ "$BUILD_CHROMA" == "true" ]]; then
+  echo "Updating Helm values.yaml - chroma only to tag: $SHA"
+  # Update only chroma tag (line after chroma.image)
+  sed -i "/^chroma:/,/^[a-z]/ s|^\(\s*tag:\s*\).*|\\1\"$SHA\"|" deploy/helm/values.yaml
+elif [[ "$BUILD_APP" == "true" ]]; then
+  echo "Updating Helm values.yaml - streamlit only to tag: $SHA"
+  # Update only streamlit tag (line after streamlit.image)
+  sed -i "/^streamlit:/,/^[a-z]/ s|^\(\s*tag:\s*\).*|\\1\"$SHA\"|" deploy/helm/values.yaml
+fi
 
 # Commit and push so Argo CD sees the change
 if [[ "$NO_COMMIT" == "true" ]]; then
