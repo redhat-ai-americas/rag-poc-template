@@ -69,40 +69,49 @@ class AgentNodes:
                 "model": AGENT_CONFIGS["wiki"]["model"],
             }
 
-        # Optional query rewrite using recent history (simple, same model)
+        # Optional query rewrite using recent history
         rewritten = None
         if chat_history:
             try:
-                history_lines = [ln for ln in chat_history.split("\n") if ln.strip()][
-                    -QUERY_REWRITER_TURNS * 2 :
-                ]
+                history_lines = [
+                    ln for ln in chat_history.split("\n") if ln.strip()
+                ][-QUERY_REWRITER_TURNS * 2 :]
                 concise_history = "\n".join(history_lines)
-                rewriter_prompt = f"""
-                You are a query rewriter.
-                Rewrite the user's question based on recent conversation for clarity and self-containment.
+                rewriter_prompt = f"""You are a query rewriter for a document search system.
 
-                Recent conversation:
-                {concise_history}
+TASK: Determine if this is a NEW query or a FOLLOW-UP, then rewrite accordingly.
 
-                ORIGINAL QUESTION
-                {query}
+Recent conversation:
+{concise_history}
 
-                CONSTRAINTS
-                - Return ONLY the rewritten question text.
-                - Do NOT answer the question.
-                - Single sentence, no code fences, no preface.
-                """
+CURRENT QUESTION:
+{query}
+
+RULES:
+1. If the question mentions a SPECIFIC topic/entity name, this is a NEW QUERY.
+   → Return the question AS-IS or with minimal changes. Do NOT add context from previous topics.
+
+2. If the question is vague and references "it", "this", "that", "what about", etc. WITHOUT naming a specific topic, this is a FOLLOW-UP.
+   → Add the relevant topic name from the recent conversation to make it self-contained.
+
+OUTPUT: Return ONLY the final question. No explanation, no quotes, no preface.
+"""
                 messages = [
                     SystemMessage(content=rewriter_prompt),
-                    HumanMessage(content="Rewrite only. Output just the question."),
+                    HumanMessage(content="Output the rewritten question only."),
                 ]
                 rewritten_resp = self.agents["wiki"].invoke(messages)
                 rewritten = (rewritten_resp.content or "").strip()
+                # Remove quotes if the model wrapped the response
+                if rewritten.startswith('"') and rewritten.endswith('"'):
+                    rewritten = rewritten[1:-1]
+                if rewritten.startswith("'") and rewritten.endswith("'"):
+                    rewritten = rewritten[1:-1]
             except Exception:
                 rewritten = None
 
         effective_query = rewritten or query
-        
+
         # Build hybrid retriever: vector + BM25 for better keyword matching
         vector_retriever = wiki_store.as_retriever(
             search_type="similarity_score_threshold",
@@ -152,18 +161,16 @@ class AgentNodes:
         # Soft cap context size based on LLM context window
         context = context[:CONTEXT_MAX_CHARS]
 
-        # System prompt for RAG
+        # System prompt for RAG - NO chat history (query rewriter handles context)
         system_prompt = f"""### ROLE AND GOAL ###
 You are an AI assistant. Your purpose is to provide clear and accurate answers based on the provided context.
 
 ### INSTRUCTIONS ###
-1. Synthesize Your Answer: Combine the provided context with your internal knowledge to form your answer. If the context and your internal memory conflict, treat the provided context as the more current source of truth.
-2. Address the Question: Directly answer the user's question.
+1. Answer the question using ONLY the context provided below.
+2. If the context and your internal memory conflict, treat the provided context as the more current source of truth.
 3. Format for Readability: Use bullet points, numbered lists, and **bold text** to make key information easy to follow.
-4. Admit When You Don't Know: If the answer cannot be found in the provided context or your internal memory, respond with: "I'm sorry, I couldn't find an answer to your question in the available documentation." NEVER invent an answer.
-
-### CONVERSATION SO FAR ###
-{chat_history}
+4. If the answer cannot be found in the provided context, respond with: "I'm sorry, I couldn't find an answer to your question in the available documentation." NEVER invent an answer.
+5. Focus ONLY on what is asked in the question - do not reference information from other topics.
 
 ### CONTEXT ###
 {context}
