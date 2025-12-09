@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/pdavis327/create-model-registry.git
+    repoURL: https://github.com/CHANGE_ME/create-model-registry.git
     targetRevision: main
     path: charts/create-model-registry
     helm:

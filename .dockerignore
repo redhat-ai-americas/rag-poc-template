@@ -1,0 +1,33 @@
+# Ignore Git
+.git
+.gitignore
+
+
+# kube
+*.yaml
+#assets
+assets/CA-SIMM
+
+infrastructure/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore Docker-related files not needed in image
+docker-compose.yaml
+Containerfile*
+
+# Ignore model files if applicable
+*.pt
+*.onnx
+models/
+taxonomy/
+notebooks/
+
+# ignore vector_db
+/vector_db
+
+config_example.pyc
+.env.example

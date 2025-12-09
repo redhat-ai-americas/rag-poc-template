@@ -9,7 +9,9 @@ __pycache__/
 
 # data
 assets/CA-SIMM
-models/
+models/aligned/*
+!models/aligned/
+!models/aligned/README.md
 taxonomy/
 
 infrastructure/
